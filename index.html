@@ -2,30 +2,36 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Simulador 3D: Conservación de la Energía</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Energía 3D</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: 'Inter', sans-serif; touch-action: none; }
-        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        body { margin: 0; overflow: hidden; background-color: #1e293b; font-family: 'Inter', sans-serif; }
         
-        /* UI Styles */
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 1.5rem; box-sizing: border-box; }
-        .panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); border-radius: 1rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); pointer-events: auto; }
-        .bar-container { width: 100%; height: 1.25rem; background-color: #d1d5db; border-radius: 9999px; overflow: hidden; margin-top: 0.25rem; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
-        .bar-fill { height: 100%; width: 0%; transition: width 0.1s linear; }
+        /* Layout principal: Canvas a la izquierda, UI a la derecha */
+        #app-container { display: flex; width: 100vw; height: 100vh; }
+        #canvas-container { flex-grow: 1; position: relative; overflow: hidden; background-color: #87CEEB; }
+        #sidebar { width: 320px; min-width: 320px; background-color: #f8fafc; border-left: 2px solid #cbd5e1; display: flex; flex-direction: column; z-index: 10; box-shadow: -4px 0 15px rgba(0,0,0,0.1); }
         
-        #bar-elastic { background-color: #10b981; } /* Verde */
-        #bar-kinetic { background-color: #3b82f6; } /* Azul */
-        #bar-potential { background-color: #ef4444; } /* Rojo */
-        #bar-total { background-color: #eab308; } /* Amarillo */
+        /* Estilos de barras de energía */
+        .bar-container { width: 100%; height: 1.5rem; background-color: #e2e8f0; border-radius: 0.5rem; overflow: hidden; position: relative; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.15s ease-out; }
+        .bar-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: white; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
         
-        #loading-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: #87CEEB; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s; }
-        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #3b82f6; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
+        #bar-elastic .bar-fill { background-color: #10b981; } 
+        #bar-kinetic .bar-fill { background-color: #3b82f6; } 
+        #bar-potential .bar-fill { background-color: #ef4444; } 
+        #bar-total .bar-fill { background-color: #f59e0b; }
+
+        /* Pantalla de carga */
+        #loading { position: absolute; inset: 0; background: #87CEEB; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s; }
+        .spinner { border: 6px solid #f3f3f3; border-top: 6px solid #3b82f6; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        input[type=range] { width: 100%; accent-color: #3b82f6; }
     </style>
 
-    <!-- El uso de importmap resuelve los errores de ejecución al importar addons como FBXLoader -->
     <script type="importmap">
         {
             "imports": {
@@ -37,62 +43,70 @@
 </head>
 <body>
 
-    <!-- Pantalla de Carga -->
-    <div id="loading-overlay">
-        <div class="loader"></div>
-        <h2 class="mt-4 text-xl font-bold text-gray-800">Cargando Entorno 3D...</h2>
-        <p class="text-gray-600 text-sm mt-2" id="loading-text">Iniciando simulador</p>
+    <div id="loading">
+        <div class="spinner"></div>
+        <h2 class="mt-4 text-2xl font-bold text-white shadow-sm">Cargando Escenario 3D...</h2>
     </div>
 
-    <div id="canvas-container"></div>
+    <div id="app-container">
+        <!-- Contenedor del Mundo 3D -->
+        <div id="canvas-container"></div>
 
-    <div id="ui-layer">
-        <!-- Panel Superior -->
-        <div class="panel p-4 max-w-md mx-auto w-full text-center">
-            <h1 class="text-2xl font-extrabold text-gray-800 mb-2">🏔️ Lab. de Energía</h1>
-            <p class="text-sm text-gray-700">
-                Arrastra la bola roja hacia atrás para almacenar <b>Energía Elástica</b>. Suéltala para ver cómo se transforma en <b>Cinética</b> (velocidad) y <b>Potencial</b> (altura).
-            </p>
-            <button id="btn-reset" class="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full transition transform hover:scale-105 shadow-md">
-                Reiniciar Pelota
-            </button>
-        </div>
-
-        <!-- Panel de Barras de Energía -->
-        <div class="panel p-5 max-w-lg mx-auto w-full">
-            <h2 class="text-lg font-bold text-gray-800 mb-3 border-b pb-2">Monitores de Energía</h2>
+        <!-- Panel Lateral (Sidebar) -->
+        <div id="sidebar" class="p-5 overflow-y-auto">
+            <h1 class="text-2xl font-extrabold text-slate-800 border-b-2 border-blue-500 pb-2 mb-4">Física 3D</h1>
             
-            <div class="mb-3">
-                <div class="flex justify-between text-sm font-semibold text-gray-700">
-                    <span>⚡ Elástica (Resorte)</span>
-                    <span id="val-elastic">0 J</span>
+            <p class="text-sm text-slate-600 mb-6 bg-slate-100 p-3 rounded-lg border border-slate-200">
+                Arrastra la <b class="text-red-500">esfera roja</b> hacia atrás para tensar las bandas. ¡Suéltala y observa cómo se transforma la energía!
+            </p>
+
+            <div class="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">Propiedades</h2>
+                
+                <div class="mb-3">
+                    <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1">
+                        <span>Masa de la Esfera (kg)</span>
+                        <span id="val-mass">2.0</span>
+                    </div>
+                    <input type="range" id="slider-mass" min="0.5" max="5" step="0.1" value="2.0">
                 </div>
-                <div class="bar-container"><div id="bar-elastic" class="bar-fill"></div></div>
+
+                <div>
+                    <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1">
+                        <span>Constante Elástica (k)</span>
+                        <span id="val-spring">80</span>
+                    </div>
+                    <input type="range" id="slider-spring" min="20" max="150" step="10" value="80">
+                </div>
             </div>
 
-            <div class="mb-3">
-                <div class="flex justify-between text-sm font-semibold text-gray-700">
-                    <span>💨 Cinética (Velocidad)</span>
-                    <span id="val-kinetic">0 J</span>
+            <div class="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex-grow">
+                <h2 class="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">Energía (Julios)</h2>
+                
+                <div class="mb-4">
+                    <div class="text-xs font-bold text-slate-700 mb-1">⚡ Elástica (Banda elástica)</div>
+                    <div class="bar-container"><div id="bar-elastic" class="bar-fill"></div><div id="text-elastic" class="bar-text">0 J</div></div>
                 </div>
-                <div class="bar-container"><div id="bar-kinetic" class="bar-fill"></div></div>
+
+                <div class="mb-4">
+                    <div class="text-xs font-bold text-slate-700 mb-1">💨 Cinética (Velocidad)</div>
+                    <div class="bar-container"><div id="bar-kinetic" class="bar-fill"></div><div id="text-kinetic" class="bar-text">0 J</div></div>
+                </div>
+
+                <div class="mb-4">
+                    <div class="text-xs font-bold text-slate-700 mb-1">⛰️ Potencial (Altura)</div>
+                    <div class="bar-container"><div id="bar-potential" class="bar-fill"></div><div id="text-potential" class="bar-text">0 J</div></div>
+                </div>
+
+                <div class="mt-5 pt-4 border-t border-slate-200">
+                    <div class="text-xs font-bold text-slate-800 mb-1">Total Mecánica</div>
+                    <div class="bar-container"><div id="bar-total" class="bar-fill"></div><div id="text-total" class="bar-text">0 J</div></div>
+                </div>
             </div>
 
-            <div class="mb-3">
-                <div class="flex justify-between text-sm font-semibold text-gray-700">
-                    <span>⛰️ Potencial (Altura)</span>
-                    <span id="val-potential">0 J</span>
-                </div>
-                <div class="bar-container"><div id="bar-potential" class="bar-fill"></div></div>
-            </div>
-
-            <div class="mt-4 pt-3 border-t border-gray-300">
-                <div class="flex justify-between text-sm font-bold text-gray-900">
-                    <span>Energía Total del Sistema</span>
-                    <span id="val-total">0 J</span>
-                </div>
-                <div class="bar-container"><div id="bar-total" class="bar-fill"></div></div>
-            </div>
+            <button id="btn-reset" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-xl transition duration-200 shadow-md">
+                Detener y Reiniciar
+            </button>
         </div>
     </div>
 
@@ -100,218 +114,234 @@
         import * as THREE from 'three';
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
-        // Variables Globales
+        // Elementos DOM
+        const container = document.getElementById('canvas-container');
+        const rect = container.getBoundingClientRect(); // Para calcular el mouse
+        
+        // Tres elementos básicos de Three.js
         let scene, camera, renderer;
+        
+        // Objetos interactivos
         let ball, rubberBandLeft, rubberBandRight, dragPlane;
         
-        // Estados del Juego
+        // Fases de la simulación
         const STATE = { IDLE: 0, DRAGGING: 1, FLYING: 2 };
         let currentState = STATE.IDLE;
         
-        // Parámetros Físicos
-        const mass = 1.0; // kg
-        const gravity = 25.0; // m/s^2 (ajustado para visualización)
-        const kSpring = 30.0; // Constante elástica (N/m)
-        const maxDragDist = 12; // Máximo estiramiento permitido
-        const maxEnergy = (0.5 * kSpring * maxDragDist * maxDragDist) + (mass * gravity * 15); // Límite visual
+        // Configuración Física (ajustables vía UI)
+        let mass = parseFloat(document.getElementById('slider-mass').value);
+        let kSpring = parseFloat(document.getElementById('slider-spring').value);
+        const gravity = 15.0; 
         
-        let ballRadius = 1;
-        let anchorPos = new THREE.Vector3(0, ballRadius, 2);
+        // Constantes del mundo
+        const ballRadius = 1.2; // Más grande y visible
+        const maxDragDist = 18; // Qué tanto hacia atrás se puede estirar
+        const maxEnergyLimit = (0.5 * 150 * maxDragDist * maxDragDist); // Para el % de las barras
+        
+        // Geometría del circuito
+        const startZ = 20; // Anclaje de la resortera
+        const rampStart = 5;
+        const rampEnd = -25;
+        const rampHeight = 12;
+        const rampLenZ = Math.abs(rampStart - rampEnd);
+        const rampSlope = Math.atan2(rampHeight, rampLenZ);
+
+        // Vectores de física
+        let anchorPos = new THREE.Vector3(0, ballRadius, startZ);
         let pos = new THREE.Vector3().copy(anchorPos);
         let vel = new THREE.Vector3(0, 0, 0);
-        let currentEnergy = { elastic: 0, kinetic: 0, potential: 0, total: 0 };
-
-        // Definición de la Rampa
-        const rampData = {
-            width: 16,
-            startZ: -10,
-            endZ: -40,
-            height: 15
-        };
-        rampData.lengthZ = Math.abs(rampData.endZ - rampData.startZ);
+        let energies = { elastic: 0, kinetic: 0, potential: 0, total: 0 };
 
         init();
 
         function init() {
-            const container = document.getElementById('canvas-container');
-
-            // Escena
+            // Escena y fondo celeste
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 30, 150);
+            scene.background = new THREE.Color(0x87CEEB); 
+            scene.fog = new THREE.Fog(0x87CEEB, 40, 150); // Para disimular el horizonte
 
-            // Cámara (Perspectiva desde arriba/atrás)
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 45, 30);
-            camera.lookAt(0, 5, -20);
+            // Cámara
+            // Se calcula el aspecto basado en el contenedor restante (sin el sidebar)
+            camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(35, 40, 45); // Vista lateral-isométrica superior
+            camera.lookAt(0, 5, 0);
 
-            // Renderer
+            // Renderizador
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(container.clientWidth, container.clientHeight);
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             container.appendChild(renderer.domElement);
 
-            // Luces
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            // ILUMINACIÓN (Crucial para ver bien los colores)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); 
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(20, 50, 20);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            dirLight.position.set(20, 60, 30);
             dirLight.castShadow = true;
             dirLight.shadow.mapSize.width = 2048;
             dirLight.shadow.mapSize.height = 2048;
-            dirLight.shadow.camera.left = -50;
-            dirLight.shadow.camera.right = 50;
-            dirLight.shadow.camera.top = 50;
-            dirLight.shadow.camera.bottom = -50;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 150;
+            dirLight.shadow.camera.left = -40;
+            dirLight.shadow.camera.right = 40;
+            dirLight.shadow.camera.top = 40;
+            dirLight.shadow.camera.bottom = -40;
             scene.add(dirLight);
 
-            buildEnvironment();
-            setupInteraction();
-            
-            // Iniciar animación y remover loader
+            buildTrack();
+            loadDecorations();
+            setupInteractions();
+            setupUIListeners();
+
             window.addEventListener('resize', onWindowResize);
-            document.getElementById('btn-reset').addEventListener('click', resetBall);
-            
-            document.getElementById('loading-overlay').style.opacity = '0';
-            setTimeout(() => { document.getElementById('loading-overlay').style.display = 'none'; }, 500);
+
+            // Quitar pantalla de carga tras inicializar
+            setTimeout(() => {
+                const loader = document.getElementById('loading');
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }, 800);
 
             animate();
         }
 
-        function buildEnvironment() {
-            // Suelo base
-            const groundGeo = new THREE.PlaneGeometry(200, 200);
-            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 0.9 });
-            const ground = new THREE.Mesh(groundGeo, groundMat);
+        function buildTrack() {
+            // 1. Suelo
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 1 });
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // Rampa
-            const rampLen = Math.sqrt(rampData.lengthZ**2 + rampData.height**2);
-            const rampAngle = Math.atan2(rampData.height, rampData.lengthZ);
-            const rampGeo = new THREE.PlaneGeometry(rampData.width, rampLen);
-            const rampMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.8 });
-            const ramp = new THREE.Mesh(rampGeo, rampMat);
-            
-            ramp.position.set(0, rampData.height / 2, rampData.startZ - rampData.lengthZ / 2);
-            ramp.rotation.x = -Math.PI / 2 + rampAngle;
+            // 2. Rampa (Plano inclinado)
+            const rampLen = Math.sqrt(rampLenZ**2 + rampHeight**2);
+            const rampMat = new THREE.MeshStandardMaterial({ color: 0xa16207, roughness: 0.8 });
+            const ramp = new THREE.Mesh(new THREE.PlaneGeometry(16, rampLen), rampMat);
+            ramp.position.set(0, rampHeight / 2, rampStart - rampLenZ / 2);
+            ramp.rotation.x = -Math.PI / 2 + rampSlope;
             ramp.receiveShadow = true;
             ramp.castShadow = true;
             scene.add(ramp);
 
-            // Plataforma alta detrás de la rampa
-            const platGeo = new THREE.BoxGeometry(rampData.width, rampData.height, 40);
-            const plateau = new THREE.Mesh(platGeo, rampMat);
-            plateau.position.set(0, rampData.height / 2, rampData.endZ - 20);
+            // 3. Plataforma superior
+            const plateau = new THREE.Mesh(new THREE.BoxGeometry(16, rampHeight, 60), rampMat);
+            plateau.position.set(0, rampHeight / 2, rampEnd - 30);
             plateau.receiveShadow = true;
             plateau.castShadow = true;
             scene.add(plateau);
 
-            // Sistema de Resortera
-            const poleMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
-            const poleGeo = new THREE.CylinderGeometry(0.3, 0.3, 3);
+            // 4. Postes de la resortera
+            const poleGeo = new THREE.CylinderGeometry(0.6, 0.6, 5);
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x451a03 });
             const leftPole = new THREE.Mesh(poleGeo, poleMat);
-            leftPole.position.set(-4, 1.5, anchorPos.z);
+            leftPole.position.set(-6, 2.5, startZ);
             leftPole.castShadow = true;
             const rightPole = new THREE.Mesh(poleGeo, poleMat);
-            rightPole.position.set(4, 1.5, anchorPos.z);
+            rightPole.position.set(6, 2.5, startZ);
             rightPole.castShadow = true;
             scene.add(leftPole, rightPole);
 
-            // Bandas elásticas visuales
-            const bandMat = new THREE.LineBasicMaterial({ color: 0x111111, linewidth: 3 });
-            rubberBandLeft = new THREE.Line(new THREE.BufferGeometry().setFromPoints([leftPole.position, anchorPos]), bandMat);
-            rubberBandRight = new THREE.Line(new THREE.BufferGeometry().setFromPoints([rightPole.position, anchorPos]), bandMat);
-            scene.add(rubberBandLeft, rubberBandRight);
-
-            // Pelota (Proyectil)
+            // 5. LA PELOTA (Asegurando extrema visibilidad)
             const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
-            const ballMat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.2, metalness: 0.1 });
+            const ballMat = new THREE.MeshStandardMaterial({ 
+                color: 0xff1111,    // Rojo intenso
+                roughness: 0.2,     // Refleja algo de luz
+                emissive: 0x440000  // Evita que las sombras la pongan negra
+            });
             ball = new THREE.Mesh(ballGeo, ballMat);
-            ball.position.copy(anchorPos);
+            ball.position.copy(anchorPos); // y = ballRadius garantiza que toque el suelo
             ball.castShadow = true;
             scene.add(ball);
 
-            // Plano invisible para detectar el arrastre del mouse (Raycasting)
-            dragPlane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ visible: false }));
+            // 6. Bandas elásticas visuales
+            const bandMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 3 });
+            rubberBandLeft = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-6, 4, startZ), anchorPos]), bandMat);
+            rubberBandRight = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(6, 4, startZ), anchorPos]), bandMat);
+            scene.add(rubberBandLeft, rubberBandRight);
+
+            // 7. Plano invisible para interacción con raycaster (altura de la pelota)
+            dragPlane = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshBasicMaterial({ visible: false }));
             dragPlane.rotation.x = -Math.PI / 2;
             dragPlane.position.y = ballRadius;
             scene.add(dragPlane);
-
-            loadSceneryTrees();
         }
 
-        function loadSceneryTrees() {
+        function loadDecorations() {
+            // Generar posiciones aleatorias para los árboles, evitando la pista central
             const treePositions = [];
-            // Generar posiciones aleatorias para árboles, evitando el centro
             for (let i = 0; i < 40; i++) {
-                let tx = (Math.random() - 0.5) * 100;
-                let tz = (Math.random() - 0.5) * 120 - 20;
-                if (Math.abs(tx) < 14 && tz > -70 && tz < 15) continue; 
-                treePositions.push({ x: tx, z: tz });
+                let x = (Math.random() - 0.5) * 160;
+                let z = (Math.random() - 0.5) * 160;
+                if (Math.abs(x) < 15 && z > -70 && z < 40) continue; // Zona de la pista
+                treePositions.push({ x: x, z: z });
             }
 
             const loader = new FBXLoader();
-            const textureLoader = new THREE.TextureLoader();
-
-            // Intento cargar el modelo FBX provisto
-            loader.load(
-                'tree.fbx',
+            
+            // Intento cargar FBX. Manejando errores de red/CORS
+            loader.load('tree.fbx', 
                 (fbx) => {
-                    // Cargar textura específica solicitada
-                    textureLoader.load('Textures/colormap.png', (texture) => {
-                        fbx.traverse((child) => {
-                            if (child.isMesh) {
-                                child.material = new THREE.MeshStandardMaterial({ 
-                                    map: texture,
-                                    roughness: 0.8
-                                });
-                                child.castShadow = true;
-                                child.receiveShadow = true;
-                            }
-                        });
-                        distributeTrees(fbx, treePositions, 0.015); // Escala suele ser necesaria en FBX
-                    }, undefined, () => {
-                        // Si falla la textura, usa el FBX sin ella
-                        distributeTrees(fbx, treePositions, 0.015);
-                    });
-                },
-                undefined, // Progreso
-                (error) => {
-                    console.warn("⚠️ No se pudo cargar 'tree.fbx'. Utilizando árboles de respaldo básicos para evitar fallos.", error);
-                    createFallbackTrees(treePositions);
+                    const textureLoader = new THREE.TextureLoader();
+                    textureLoader.load('Textures/colormap.png', 
+                        (texture) => {
+                            fbx.traverse((child) => {
+                                if (child.isMesh) {
+                                    child.material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8 });
+                                    child.castShadow = true;
+                                    child.receiveShadow = true;
+                                }
+                            });
+                            distributeTrees(fbx, treePositions, 0.015);
+                        }, 
+                        undefined, 
+                        () => {
+                            // Fallback sin textura: pintar todo verde
+                            fbx.traverse((child) => {
+                                if (child.isMesh) {
+                                    child.material = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+                                    child.castShadow = true;
+                                }
+                            });
+                            distributeTrees(fbx, treePositions, 0.015);
+                        }
+                    );
+                }, 
+                undefined, 
+                (err) => {
+                    console.log("No se pudo cargar FBX (CORS/Ruta). Generando bosque procedural...");
+                    generateProceduralTrees(treePositions);
                 }
             );
         }
 
         function distributeTrees(model, positions, scale) {
             positions.forEach(pos => {
-                const tree = model.clone();
-                tree.position.set(pos.x, 0, pos.z);
-                tree.scale.set(scale, scale, scale);
-                // Rotación aleatoria
-                tree.rotation.y = Math.random() * Math.PI * 2;
-                scene.add(tree);
+                const t = model.clone();
+                t.position.set(pos.x, 0, pos.z);
+                t.scale.set(scale, scale, scale);
+                t.rotation.y = Math.random() * Math.PI * 2;
+                scene.add(t);
             });
         }
 
-        function createFallbackTrees(positions) {
-            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.7, 2.5);
+        function generateProceduralTrees(positions) {
+            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.8, 3, 8);
             const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5C4033 });
-            const leavesGeo = new THREE.ConeGeometry(2.5, 6, 8);
-            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+            const leavesGeo = new THREE.ConeGeometry(3, 7, 8);
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.9 });
 
             positions.forEach(pos => {
                 const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-                trunk.position.set(pos.x, 1.25, pos.z);
+                trunk.position.set(pos.x, 1.5, pos.z);
                 trunk.castShadow = true;
+                trunk.receiveShadow = true;
                 
                 const leaves = new THREE.Mesh(leavesGeo, leavesMat);
-                leaves.position.set(pos.x, 4.5, pos.z);
+                leaves.position.set(pos.x, 6, pos.z);
                 leaves.castShadow = true;
+                leaves.receiveShadow = true;
                 
                 scene.add(trunk, leaves);
             });
@@ -320,219 +350,225 @@
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        function setupInteraction() {
+        function setupInteractions() {
             const canvas = renderer.domElement;
+            // Usamos pointer events para unificar mouse y táctil
             canvas.addEventListener('pointerdown', onPointerDown);
-            canvas.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointermove', onPointerMove);
             window.addEventListener('pointerup', onPointerUp);
-            // Soporte táctil adicional para móviles
-            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onPointerDown(e.touches[0]); }, {passive: false});
-            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); onPointerMove(e.touches[0]); }, {passive: false});
-            window.addEventListener('touchend', onPointerUp);
         }
 
+        // Obtiene las coordenadas mapeadas al canvas de la izquierda
         function getIntersects(event) {
-            let clientX = event.clientX !== undefined ? event.clientX : event.pageX;
-            let clientY = event.clientY !== undefined ? event.clientY : event.pageY;
-            mouse.x = (clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+            const rect = container.getBoundingClientRect();
+            // Validar que el mouse esté dentro del canvas
+            if (event.clientX > rect.right || event.clientX < rect.left) return [];
+            
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
             raycaster.setFromCamera(mouse, camera);
             return raycaster.intersectObject(dragPlane);
         }
 
         function onPointerDown(event) {
-            if (currentState === STATE.FLYING) return;
+            if (currentState === STATE.FLYING) return; // No tocar mientras vuela
+            
             const intersects = getIntersects(event);
             if (intersects.length > 0) {
-                // Permitir agarre si se hace clic cerca del área del ancla
-                if (intersects[0].point.distanceTo(anchorPos) < 15 || currentState === STATE.IDLE) {
+                // Distancia entre el clic y la pelota
+                if (intersects[0].point.distanceTo(ball.position) < 8) {
                     currentState = STATE.DRAGGING;
+                    document.body.style.cursor = 'grabbing';
                 }
             }
         }
 
         function onPointerMove(event) {
             if (currentState !== STATE.DRAGGING) return;
+            
             const intersects = getIntersects(event);
             if (intersects.length > 0) {
                 let target = intersects[0].point;
-                // Restringir a tirar hacia atrás solamente
-                if (target.z < anchorPos.z) target.z = anchorPos.z; 
                 
-                // Limitar la máxima deformación del resorte
+                // Solo estirar hacia atrás (z positivo desde el ancla)
+                if (target.z < anchorPos.z) target.z = anchorPos.z;
+                
+                // Límite máximo de estiramiento
                 let dist = anchorPos.distanceTo(target);
                 if (dist > maxDragDist) {
                     let dir = target.clone().sub(anchorPos).normalize();
                     target = anchorPos.clone().add(dir.multiplyScalar(maxDragDist));
                 }
                 
+                // Mantener en el eje central X para simplificar
+                target.x *= 0.5; // Restringir un poco el desvío lateral
+
                 pos.copy(target);
                 ball.position.copy(pos);
-                updateRubberBands();
+                updateBandsVisuals();
             }
         }
 
         function onPointerUp() {
             if (currentState === STATE.DRAGGING) {
+                document.body.style.cursor = 'default';
                 currentState = STATE.FLYING;
                 
-                // Transformación de Energía: Elástica -> Cinética inicial
+                // FÍSICA: Energía Potencial Elástica = 1/2 * k * x^2
                 let dist = anchorPos.distanceTo(pos);
                 let eElastic = 0.5 * kSpring * dist * dist;
                 
-                // v = sqrt((2 * E) / m)
+                // Conversión a Cinética: E_k = 1/2 * m * v^2  => v = sqrt(2 * E_k / m)
                 let speed = Math.sqrt((2 * eElastic) / mass);
                 
-                // Vector de dirección de disparo
+                // Dirección de disparo (desde donde estiró hacia el ancla central)
                 let dir = anchorPos.clone().sub(pos).normalize();
+                
                 vel.copy(dir).multiplyScalar(speed);
-
-                // Relajar visualmente la resortera
-                rubberBandLeft.geometry.setFromPoints([new THREE.Vector3(-4, 1.5, anchorPos.z), anchorPos]);
-                rubberBandRight.geometry.setFromPoints([new THREE.Vector3(4, 1.5, anchorPos.z), anchorPos]);
+                
+                // Reset bandas al reposo
+                rubberBandLeft.geometry.setFromPoints([new THREE.Vector3(-6, 4, startZ), anchorPos]);
+                rubberBandRight.geometry.setFromPoints([new THREE.Vector3(6, 4, startZ), anchorPos]);
             }
         }
 
-        function resetBall() {
-            currentState = STATE.IDLE;
-            pos.copy(anchorPos);
-            ball.position.copy(pos);
-            vel.set(0, 0, 0);
-            updateRubberBands();
+        function updateBandsVisuals() {
+            rubberBandLeft.geometry.setFromPoints([new THREE.Vector3(-6, 4, startZ), ball.position]);
+            rubberBandRight.geometry.setFromPoints([new THREE.Vector3(6, 4, startZ), ball.position]);
         }
 
-        function updateRubberBands() {
-            rubberBandLeft.geometry.setFromPoints([new THREE.Vector3(-4, 1.5, anchorPos.z), ball.position]);
-            rubberBandRight.geometry.setFromPoints([new THREE.Vector3(4, 1.5, anchorPos.z), ball.position]);
+        function setupUIListeners() {
+            document.getElementById('slider-mass').addEventListener('input', (e) => {
+                mass = parseFloat(e.target.value);
+                document.getElementById('val-mass').innerText = mass.toFixed(1);
+            });
+            document.getElementById('slider-spring').addEventListener('input', (e) => {
+                kSpring = parseFloat(e.target.value);
+                document.getElementById('val-spring').innerText = kSpring.toFixed(0);
+            });
+            document.getElementById('btn-reset').addEventListener('click', () => {
+                currentState = STATE.IDLE;
+                pos.copy(anchorPos);
+                ball.position.copy(pos);
+                vel.set(0,0,0);
+                updateBandsVisuals();
+            });
+        }
+
+        function onWindowResize() {
+            // Recalcular ignorando el sidebar (320px)
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
         }
 
         let lastTime = performance.now();
 
         function animate() {
             requestAnimationFrame(animate);
-            
-            try {
-                let time = performance.now();
-                let dt = Math.min((time - lastTime) / 1000, 0.03); // dt tapado para estabilidad física
-                lastTime = time;
+            let time = performance.now();
+            // Limitar delta time para evitar teletransporte si baja los FPS
+            let dt = Math.min((time - lastTime) / 1000, 0.02); 
+            lastTime = time;
 
-                if (currentState === STATE.DRAGGING) {
-                    // Cálculo de Energía Potencial Elástica: U_e = 1/2 k x^2
-                    let dist = anchorPos.distanceTo(pos);
-                    currentEnergy.elastic = 0.5 * kSpring * dist * dist;
-                    currentEnergy.kinetic = 0;
-                    currentEnergy.potential = mass * gravity * Math.max(0, pos.y - ballRadius);
-                } 
-                else if (currentState === STATE.FLYING) {
-                    currentEnergy.elastic = 0;
-                    
-                    // Aplicar gravedad
-                    vel.y -= gravity * dt;
-
-                    // Posición tentativa
-                    let nextPos = pos.clone().add(vel.clone().multiplyScalar(dt));
-                    
-                    // Lógica de colisión con el terreno/rampa
-                    let surfaceY = 0;
-                    let onGround = false;
-                    let currentNorm = new THREE.Vector3(0, 1, 0); // Normal plana por defecto
-
-                    // Analizar si está en la zona de la rampa
-                    if (nextPos.z <= rampData.startZ && nextPos.z > rampData.endZ && Math.abs(nextPos.x) < rampData.width / 2) {
-                        let progress = (rampData.startZ - nextPos.z) / rampData.lengthZ;
-                        surfaceY = progress * rampData.height;
-                        
-                        // Normal de la rampa
-                        let angle = Math.atan2(rampData.height, rampData.lengthZ);
-                        currentNorm.set(0, Math.cos(angle), Math.sin(angle)).normalize();
-                    } 
-                    // Analizar si está en la plataforma superior
-                    else if (nextPos.z <= rampData.endZ && Math.abs(nextPos.x) < rampData.width / 2) {
-                        surfaceY = rampData.height;
-                    }
-
-                    // Resolver penetración en el suelo
-                    if (nextPos.y < surfaceY + ballRadius) {
-                        nextPos.y = surfaceY + ballRadius;
-                        onGround = true;
-
-                        // Redirigir velocidad a lo largo de la superficie (Eliminar componente perpendicular)
-                        let dotProduct = vel.dot(currentNorm);
-                        if (dotProduct < 0) {
-                            let proj = currentNorm.clone().multiplyScalar(dotProduct);
-                            vel.sub(proj);
-                        }
-                        
-                        // Fricción rodante (pérdida de energía)
-                        vel.multiplyScalar(Math.pow(0.85, dt)); 
-                    }
-
-                    // Fricción del aire muy ligera
-                    vel.multiplyScalar(Math.pow(0.99, dt));
-
-                    // Actualizar posición final del frame
-                    pos.copy(nextPos);
-                    ball.position.copy(pos);
-
-                    // Cálculos de energía en vuelo
-                    // K = 1/2 m v^2
-                    currentEnergy.kinetic = 0.5 * mass * vel.lengthSq();
-                    // U_g = m g h
-                    currentEnergy.potential = mass * gravity * Math.max(0, pos.y - ballRadius);
-
-                    // Condición de parada y reinicio automático
-                    if (onGround && vel.lengthSq() < 0.5 && pos.y <= ballRadius + 0.1 && pos.z > rampData.startZ) {
-                        setTimeout(resetBall, 1500); // Pausa breve antes de reiniciar
-                        currentState = STATE.IDLE; // Prevenir múltiples llamadas
-                    }
-                }
-                else {
-                    // ESTADO IDLE
-                    currentEnergy.elastic = 0;
-                    currentEnergy.kinetic = 0;
-                    currentEnergy.potential = mass * gravity * Math.max(0, pos.y - ballRadius);
-                }
-
-                // Principio de Conservación (Visualizado como Suma)
-                currentEnergy.total = currentEnergy.elastic + currentEnergy.kinetic + currentEnergy.potential;
-
-                updateUI();
-                renderer.render(scene, camera);
+            if (currentState === STATE.DRAGGING) {
+                // Cálculo de energía mientras arrastra
+                let dist = anchorPos.distanceTo(pos);
+                energies.elastic = 0.5 * kSpring * dist * dist;
+                energies.kinetic = 0;
+                energies.potential = mass * gravity * (pos.y - ballRadius);
+            } 
+            else if (currentState === STATE.FLYING) {
+                energies.elastic = 0; // Ya se liberó
                 
-            } catch (err) {
-                console.error("Error en el bucle de animación: ", err);
+                // Aplicar gravedad al vector de velocidad Y
+                vel.y -= gravity * dt; 
+                
+                // Nueva posición propuesta
+                let nextPos = pos.clone().add(vel.clone().multiplyScalar(dt));
+                
+                // Calcular la altura real de la superficie (Y) en la coordenada Z actual
+                let surfaceY = 0;
+                let currentNormal = new THREE.Vector3(0, 1, 0); // Vector normal apuntando arriba por defecto
+
+                // Si está sobre la rampa
+                if (nextPos.z <= rampStart && nextPos.z > rampEnd && Math.abs(nextPos.x) < 8) {
+                    let fraction = (rampStart - nextPos.z) / rampLenZ;
+                    surfaceY = fraction * rampHeight;
+                    // Normal de la rampa
+                    currentNormal.set(0, Math.cos(rampSlope), Math.sin(rampSlope)).normalize();
+                } 
+                // Si llegó a la plataforma de arriba
+                else if (nextPos.z <= rampEnd && Math.abs(nextPos.x) < 8) {
+                    surfaceY = rampHeight;
+                }
+
+                // Detección de colisión / mantenimiento en el suelo
+                if (nextPos.y < surfaceY + ballRadius) {
+                    // Evitar hundimiento
+                    nextPos.y = surfaceY + ballRadius;
+                    
+                    // Si choca contra la superficie, eliminar la velocidad en dirección hacia adentro
+                    let velDotNorm = vel.dot(currentNormal);
+                    if (velDotNorm < 0) {
+                        vel.sub(currentNormal.clone().multiplyScalar(velDotNorm));
+                    }
+                    
+                    // Fricción constante para que se detenga eventualmente
+                    vel.multiplyScalar(0.995); 
+                }
+
+                // Actualizar posición final
+                pos.copy(nextPos);
+                ball.position.copy(pos);
+
+                // Calcular energías actuales
+                energies.kinetic = 0.5 * mass * vel.lengthSq();
+                energies.potential = mass * gravity * (pos.y - ballRadius);
+
+                // Autostop si se frena mucho para evitar cálculos infinitos
+                if (vel.lengthSq() < 0.1 && pos.y < surfaceY + ballRadius + 0.1) {
+                    vel.set(0,0,0);
+                }
+                
+                // Si se sale del mundo (cae)
+                if (pos.y < -50) {
+                    document.getElementById('btn-reset').click();
+                }
             }
+            else {
+                // IDLE
+                energies.elastic = 0;
+                energies.kinetic = 0;
+                energies.potential = mass * gravity * (pos.y - ballRadius);
+            }
+
+            // Total = E + K + U
+            energies.total = energies.elastic + energies.kinetic + energies.potential;
+
+            updateUIBars();
+            renderer.render(scene, camera);
         }
 
-        function updateUI() {
-            // Evitar mostrar valores negativos por errores de flotantes minúsculos
-            const eElast = Math.max(0, currentEnergy.elastic);
-            const eKin = Math.max(0, currentEnergy.kinetic);
-            const ePot = Math.max(0, currentEnergy.potential);
-            const eTot = Math.max(0, currentEnergy.total);
+        function updateUIBars() {
+            // Prevenir números negativos visuales minúsculos por flotantes
+            const eElast = Math.max(0, energies.elastic);
+            const eKin = Math.max(0, energies.kinetic);
+            const ePot = Math.max(0, energies.potential);
+            const eTot = Math.max(0, energies.total);
 
-            // Mapeo a porcentajes visuales relativos al máximo posible
-            const pElast = Math.min(100, (eElast / maxEnergy) * 100);
-            const pKin = Math.min(100, (eKin / maxEnergy) * 100);
-            const pPot = Math.min(100, (ePot / maxEnergy) * 100);
-            const pTot = Math.min(100, (eTot / maxEnergy) * 100);
+            const scale = Math.max(maxEnergyLimit, eTot) * 1.1; // Ajuste dinámico de escala
 
-            document.getElementById('bar-elastic').style.width = pElast + '%';
-            document.getElementById('bar-kinetic').style.width = pKin + '%';
-            document.getElementById('bar-potential').style.width = pPot + '%';
-            document.getElementById('bar-total').style.width = pTot + '%';
+            document.getElementById('bar-elastic').style.width = Math.min(100, (eElast / scale) * 100) + '%';
+            document.getElementById('bar-kinetic').style.width = Math.min(100, (eKin / scale) * 100) + '%';
+            document.getElementById('bar-potential').style.width = Math.min(100, (ePot / scale) * 100) + '%';
+            document.getElementById('bar-total').style.width = Math.min(100, (eTot / scale) * 100) + '%';
 
-            // Actualización de texto UI
-            document.getElementById('val-elastic').innerText = Math.round(eElast) + ' J';
-            document.getElementById('val-kinetic').innerText = Math.round(eKin) + ' J';
-            document.getElementById('val-potential').innerText = Math.round(ePot) + ' J';
-            document.getElementById('val-total').innerText = Math.round(eTot) + ' J';
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('text-elastic').innerText = Math.round(eElast) + ' J';
+            document.getElementById('text-kinetic').innerText = Math.round(eKin) + ' J';
+            document.getElementById('text-potential').innerText = Math.round(ePot) + ' J';
+            document.getElementById('text-total').innerText = Math.round(eTot) + ' J';
         }
     </script>
 </body>
