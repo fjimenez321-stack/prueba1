@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Simulador 3D: Conservación de la Energía</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: 'Inter', sans-serif; touch-action: none; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* UI Styles */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 1.5rem; box-sizing: border-box; }
+        .panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); border-radius: 1rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); pointer-events: auto; }
+        .bar-container { width: 100%; height: 1.25rem; background-color: #d1d5db; border-radius: 9999px; overflow: hidden; margin-top: 0.25rem; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.1s linear; }
+        
+        #bar-elastic { background-color: #10b981; } /* Verde */
+        #bar-kinetic { background-color: #3b82f6; } /* Azul */
+        #bar-potential { background-color: #ef4444; } /* Rojo */
+        #bar-total { background-color: #eab308; } /* Amarillo */
+        
+        #loading-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: #87CEEB; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s; }
+        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #3b82f6; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+
+    <!-- El uso de importmap resuelve los errores de ejecución al importar addons como FBXLoader -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- Pantalla de Carga -->
+    <div id="loading-overlay">
+        <div class="loader"></div>
+        <h2 class="mt-4 text-xl font-bold text-gray-800">Cargando Entorno 3D...</h2>
+        <p class="text-gray-600 text-sm mt-2" id="loading-text">Iniciando simulador</p>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <!-- Panel Superior -->
+        <div class="panel p-4 max-w-md mx-auto w-full text-center">
+            <h1 class="text-2xl font-extrabold text-gray-800 mb-2">🏔️ Lab. de Energía</h1>
+            <p class="text-sm text-gray-700">
+                Arrastra la bola roja hacia atrás para almacenar <b>Energía Elástica</b>. Suéltala para ver cómo se transforma en <b>Cinética</b> (velocidad) y <b>Potencial</b> (altura).
+            </p>
+            <button id="btn-reset" class="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full transition transform hover:scale-105 shadow-md">
+                Reiniciar Pelota
+            </button>
+        </div>
+
+        <!-- Panel de Barras de Energía -->
+        <div class="panel p-5 max-w-lg mx-auto w-full">
+            <h2 class="text-lg font-bold text-gray-800 mb-3 border-b pb-2">Monitores de Energía</h2>
+            
+            <div class="mb-3">
+                <div class="flex justify-between text-sm font-semibold text-gray-700">
+                    <span>⚡ Elástica (Resorte)</span>
+                    <span id="val-elastic">0 J</span>
+                </div>
+                <div class="bar-container"><div id="bar-elastic" class="bar-fill"></div></div>
+            </div>
+
+            <div class="mb-3">
+                <div class="flex justify-between text-sm font-semibold text-gray-700">
+                    <span>💨 Cinética (Velocidad)</span>
+                    <span id="val-kinetic">0 J</span>
+                </div>
+                <div class="bar-container"><div id="bar-kinetic" class="bar-fill"></div></div>
+            </div>
+
+            <div class="mb-3">
+                <div class="flex justify-between text-sm font-semibold text-gray-700">
+                    <span>⛰️ Potencial (Altura)</span>
+                    <span id="val-potential">0 J</span>
+                </div>
+                <div class="bar-container"><div id="bar-potential" class="bar-fill"></div></div>
+            </div>
+
+            <div class="mt-4 pt-3 border-t border-gray-300">
+                <div class="flex justify-between text-sm font-bold text-gray-900">
+                    <span>Energía Total del Sistema</span>
+                    <span id="val-total">0 J</span>
+                </div>
+                <div class="bar-container"><div id="bar-total" class="bar-fill"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+        // Variables Globales
+        let scene, camera, renderer;
+        let ball, rubberBandLeft, rubberBandRight, dragPlane;
+        
+        // Estados del Juego
+        const STATE = { IDLE: 0, DRAGGING: 1, FLYING: 2 };
+        let currentState = STATE.IDLE;
+        
+        // Parámetros Físicos
+        const mass = 1.0; // kg
+        const gravity = 25.0; // m/s^2 (ajustado para visualización)
+        const kSpring = 30.0; // Constante elástica (N/m)
+        const maxDragDist = 12; // Máximo estiramiento permitido
+        const maxEnergy = (0.5 * kSpring * maxDragDist * maxDragDist) + (mass * gravity * 15); // Límite visual
+        
+        let ballRadius = 1;
+        let anchorPos = new THREE.Vector3(0, ballRadius, 2);
+        let pos = new THREE.Vector3().copy(anchorPos);
+        let vel = new THREE.Vector3(0, 0, 0);
+        let currentEnergy = { elastic: 0, kinetic: 0, potential: 0, total: 0 };
+
+        // Definición de la Rampa
+        const rampData = {
+            width: 16,
+            startZ: -10,
+            endZ: -40,
+            height: 15
+        };
+        rampData.lengthZ = Math.abs(rampData.endZ - rampData.startZ);
+
+        init();
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // Escena
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 30, 150);
+
+            // Cámara (Perspectiva desde arriba/atrás)
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 45, 30);
+            camera.lookAt(0, 5, -20);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Luces
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 50, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.left = -50;
+            dirLight.shadow.camera.right = 50;
+            dirLight.shadow.camera.top = 50;
+            dirLight.shadow.camera.bottom = -50;
+            scene.add(dirLight);
+
+            buildEnvironment();
+            setupInteraction();
+            
+            // Iniciar animación y remover loader
+            window.addEventListener('resize', onWindowResize);
+            document.getElementById('btn-reset').addEventListener('click', resetBall);
+            
+            document.getElementById('loading-overlay').style.opacity = '0';
+            setTimeout(() => { document.getElementById('loading-overlay').style.display = 'none'; }, 500);
+
+            animate();
+        }
+
+        function buildEnvironment() {
+            // Suelo base
+            const groundGeo = new THREE.PlaneGeometry(200, 200);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 0.9 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Rampa
+            const rampLen = Math.sqrt(rampData.lengthZ**2 + rampData.height**2);
+            const rampAngle = Math.atan2(rampData.height, rampData.lengthZ);
+            const rampGeo = new THREE.PlaneGeometry(rampData.width, rampLen);
+            const rampMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.8 });
+            const ramp = new THREE.Mesh(rampGeo, rampMat);
+            
+            ramp.position.set(0, rampData.height / 2, rampData.startZ - rampData.lengthZ / 2);
+            ramp.rotation.x = -Math.PI / 2 + rampAngle;
+            ramp.receiveShadow = true;
+            ramp.castShadow = true;
+            scene.add(ramp);
+
+            // Plataforma alta detrás de la rampa
+            const platGeo = new THREE.BoxGeometry(rampData.width, rampData.height, 40);
+            const plateau = new THREE.Mesh(platGeo, rampMat);
+            plateau.position.set(0, rampData.height / 2, rampData.endZ - 20);
+            plateau.receiveShadow = true;
+            plateau.castShadow = true;
+            scene.add(plateau);
+
+            // Sistema de Resortera
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
+            const poleGeo = new THREE.CylinderGeometry(0.3, 0.3, 3);
+            const leftPole = new THREE.Mesh(poleGeo, poleMat);
+            leftPole.position.set(-4, 1.5, anchorPos.z);
+            leftPole.castShadow = true;
+            const rightPole = new THREE.Mesh(poleGeo, poleMat);
+            rightPole.position.set(4, 1.5, anchorPos.z);
+            rightPole.castShadow = true;
+            scene.add(leftPole, rightPole);
+
+            // Bandas elásticas visuales
+            const bandMat = new THREE.LineBasicMaterial({ color: 0x111111, linewidth: 3 });
+            rubberBandLeft = new THREE.Line(new THREE.BufferGeometry().setFromPoints([leftPole.position, anchorPos]), bandMat);
+            rubberBandRight = new THREE.Line(new THREE.BufferGeometry().setFromPoints([rightPole.position, anchorPos]), bandMat);
+            scene.add(rubberBandLeft, rubberBandRight);
+
+            // Pelota (Proyectil)
+            const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
+            const ballMat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.2, metalness: 0.1 });
+            ball = new THREE.Mesh(ballGeo, ballMat);
+            ball.position.copy(anchorPos);
+            ball.castShadow = true;
+            scene.add(ball);
+
+            // Plano invisible para detectar el arrastre del mouse (Raycasting)
+            dragPlane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ visible: false }));
+            dragPlane.rotation.x = -Math.PI / 2;
+            dragPlane.position.y = ballRadius;
+            scene.add(dragPlane);
+
+            loadSceneryTrees();
+        }
+
+        function loadSceneryTrees() {
+            const treePositions = [];
+            // Generar posiciones aleatorias para árboles, evitando el centro
+            for (let i = 0; i < 40; i++) {
+                let tx = (Math.random() - 0.5) * 100;
+                let tz = (Math.random() - 0.5) * 120 - 20;
+                if (Math.abs(tx) < 14 && tz > -70 && tz < 15) continue; 
+                treePositions.push({ x: tx, z: tz });
+            }
+
+            const loader = new FBXLoader();
+            const textureLoader = new THREE.TextureLoader();
+
+            // Intento cargar el modelo FBX provisto
+            loader.load(
+                'tree.fbx',
+                (fbx) => {
+                    // Cargar textura específica solicitada
+                    textureLoader.load('Textures/colormap.png', (texture) => {
+                        fbx.traverse((child) => {
+                            if (child.isMesh) {
+                                child.material = new THREE.MeshStandardMaterial({ 
+                                    map: texture,
+                                    roughness: 0.8
+                                });
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                            }
+                        });
+                        distributeTrees(fbx, treePositions, 0.015); // Escala suele ser necesaria en FBX
+                    }, undefined, () => {
+                        // Si falla la textura, usa el FBX sin ella
+                        distributeTrees(fbx, treePositions, 0.015);
+                    });
+                },
+                undefined, // Progreso
+                (error) => {
+                    console.warn("⚠️ No se pudo cargar 'tree.fbx'. Utilizando árboles de respaldo básicos para evitar fallos.", error);
+                    createFallbackTrees(treePositions);
+                }
+            );
+        }
+
+        function distributeTrees(model, positions, scale) {
+            positions.forEach(pos => {
+                const tree = model.clone();
+                tree.position.set(pos.x, 0, pos.z);
+                tree.scale.set(scale, scale, scale);
+                // Rotación aleatoria
+                tree.rotation.y = Math.random() * Math.PI * 2;
+                scene.add(tree);
+            });
+        }
+
+        function createFallbackTrees(positions) {
+            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.7, 2.5);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5C4033 });
+            const leavesGeo = new THREE.ConeGeometry(2.5, 6, 8);
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+
+            positions.forEach(pos => {
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.set(pos.x, 1.25, pos.z);
+                trunk.castShadow = true;
+                
+                const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+                leaves.position.set(pos.x, 4.5, pos.z);
+                leaves.castShadow = true;
+                
+                scene.add(trunk, leaves);
+            });
+        }
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function setupInteraction() {
+            const canvas = renderer.domElement;
+            canvas.addEventListener('pointerdown', onPointerDown);
+            canvas.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+            // Soporte táctil adicional para móviles
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onPointerDown(e.touches[0]); }, {passive: false});
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); onPointerMove(e.touches[0]); }, {passive: false});
+            window.addEventListener('touchend', onPointerUp);
+        }
+
+        function getIntersects(event) {
+            let clientX = event.clientX !== undefined ? event.clientX : event.pageX;
+            let clientY = event.clientY !== undefined ? event.clientY : event.pageY;
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            return raycaster.intersectObject(dragPlane);
+        }
+
+        function onPointerDown(event) {
+            if (currentState === STATE.FLYING) return;
+            const intersects = getIntersects(event);
+            if (intersects.length > 0) {
+                // Permitir agarre si se hace clic cerca del área del ancla
+                if (intersects[0].point.distanceTo(anchorPos) < 15 || currentState === STATE.IDLE) {
+                    currentState = STATE.DRAGGING;
+                }
+            }
+        }
+
+        function onPointerMove(event) {
+            if (currentState !== STATE.DRAGGING) return;
+            const intersects = getIntersects(event);
+            if (intersects.length > 0) {
+                let target = intersects[0].point;
+                // Restringir a tirar hacia atrás solamente
+                if (target.z < anchorPos.z) target.z = anchorPos.z; 
+                
+                // Limitar la máxima deformación del resorte
+                let dist = anchorPos.distanceTo(target);
+                if (dist > maxDragDist) {
+                    let dir = target.clone().sub(anchorPos).normalize();
+                    target = anchorPos.clone().add(dir.multiplyScalar(maxDragDist));
+                }
+                
+                pos.copy(target);
+                ball.position.copy(pos);
+                updateRubberBands();
+            }
+        }
+
+        function onPointerUp() {
+            if (currentState === STATE.DRAGGING) {
+                currentState = STATE.FLYING;
+                
+                // Transformación de Energía: Elástica -> Cinética inicial
+                let dist = anchorPos.distanceTo(pos);
+                let eElastic = 0.5 * kSpring * dist * dist;
+                
+                // v = sqrt((2 * E) / m)
+                let speed = Math.sqrt((2 * eElastic) / mass);
+                
+                // Vector de dirección de disparo
+                let dir = anchorPos.clone().sub(pos).normalize();
+                vel.copy(dir).multiplyScalar(speed);
+
+                // Relajar visualmente la resortera
+                rubberBandLeft.geometry.setFromPoints([new THREE.Vector3(-4, 1.5, anchorPos.z), anchorPos]);
+                rubberBandRight.geometry.setFromPoints([new THREE.Vector3(4, 1.5, anchorPos.z), anchorPos]);
+            }
+        }
+
+        function resetBall() {
+            currentState = STATE.IDLE;
+            pos.copy(anchorPos);
+            ball.position.copy(pos);
+            vel.set(0, 0, 0);
+            updateRubberBands();
+        }
+
+        function updateRubberBands() {
+            rubberBandLeft.geometry.setFromPoints([new THREE.Vector3(-4, 1.5, anchorPos.z), ball.position]);
+            rubberBandRight.geometry.setFromPoints([new THREE.Vector3(4, 1.5, anchorPos.z), ball.position]);
+        }
+
+        let lastTime = performance.now();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            try {
+                let time = performance.now();
+                let dt = Math.min((time - lastTime) / 1000, 0.03); // dt tapado para estabilidad física
+                lastTime = time;
+
+                if (currentState === STATE.DRAGGING) {
+                    // Cálculo de Energía Potencial Elástica: U_e = 1/2 k x^2
+                    let dist = anchorPos.distanceTo(pos);
+                    currentEnergy.elastic = 0.5 * kSpring * dist * dist;
+                    currentEnergy.kinetic = 0;
+                    currentEnergy.potential = mass * gravity * Math.max(0, pos.y - ballRadius);
+                } 
+                else if (currentState === STATE.FLYING) {
+                    currentEnergy.elastic = 0;
+                    
+                    // Aplicar gravedad
+                    vel.y -= gravity * dt;
+
+                    // Posición tentativa
+                    let nextPos = pos.clone().add(vel.clone().multiplyScalar(dt));
+                    
+                    // Lógica de colisión con el terreno/rampa
+                    let surfaceY = 0;
+                    let onGround = false;
+                    let currentNorm = new THREE.Vector3(0, 1, 0); // Normal plana por defecto
+
+                    // Analizar si está en la zona de la rampa
+                    if (nextPos.z <= rampData.startZ && nextPos.z > rampData.endZ && Math.abs(nextPos.x) < rampData.width / 2) {
+                        let progress = (rampData.startZ - nextPos.z) / rampData.lengthZ;
+                        surfaceY = progress * rampData.height;
+                        
+                        // Normal de la rampa
+                        let angle = Math.atan2(rampData.height, rampData.lengthZ);
+                        currentNorm.set(0, Math.cos(angle), Math.sin(angle)).normalize();
+                    } 
+                    // Analizar si está en la plataforma superior
+                    else if (nextPos.z <= rampData.endZ && Math.abs(nextPos.x) < rampData.width / 2) {
+                        surfaceY = rampData.height;
+                    }
+
+                    // Resolver penetración en el suelo
+                    if (nextPos.y < surfaceY + ballRadius) {
+                        nextPos.y = surfaceY + ballRadius;
+                        onGround = true;
+
+                        // Redirigir velocidad a lo largo de la superficie (Eliminar componente perpendicular)
+                        let dotProduct = vel.dot(currentNorm);
+                        if (dotProduct < 0) {
+                            let proj = currentNorm.clone().multiplyScalar(dotProduct);
+                            vel.sub(proj);
+                        }
+                        
+                        // Fricción rodante (pérdida de energía)
+                        vel.multiplyScalar(Math.pow(0.85, dt)); 
+                    }
+
+                    // Fricción del aire muy ligera
+                    vel.multiplyScalar(Math.pow(0.99, dt));
+
+                    // Actualizar posición final del frame
+                    pos.copy(nextPos);
+                    ball.position.copy(pos);
+
+                    // Cálculos de energía en vuelo
+                    // K = 1/2 m v^2
+                    currentEnergy.kinetic = 0.5 * mass * vel.lengthSq();
+                    // U_g = m g h
+                    currentEnergy.potential = mass * gravity * Math.max(0, pos.y - ballRadius);
+
+                    // Condición de parada y reinicio automático
+                    if (onGround && vel.lengthSq() < 0.5 && pos.y <= ballRadius + 0.1 && pos.z > rampData.startZ) {
+                        setTimeout(resetBall, 1500); // Pausa breve antes de reiniciar
+                        currentState = STATE.IDLE; // Prevenir múltiples llamadas
+                    }
+                }
+                else {
+                    // ESTADO IDLE
+                    currentEnergy.elastic = 0;
+                    currentEnergy.kinetic = 0;
+                    currentEnergy.potential = mass * gravity * Math.max(0, pos.y - ballRadius);
+                }
+
+                // Principio de Conservación (Visualizado como Suma)
+                currentEnergy.total = currentEnergy.elastic + currentEnergy.kinetic + currentEnergy.potential;
+
+                updateUI();
+                renderer.render(scene, camera);
+                
+            } catch (err) {
+                console.error("Error en el bucle de animación: ", err);
+            }
+        }
+
+        function updateUI() {
+            // Evitar mostrar valores negativos por errores de flotantes minúsculos
+            const eElast = Math.max(0, currentEnergy.elastic);
+            const eKin = Math.max(0, currentEnergy.kinetic);
+            const ePot = Math.max(0, currentEnergy.potential);
+            const eTot = Math.max(0, currentEnergy.total);
+
+            // Mapeo a porcentajes visuales relativos al máximo posible
+            const pElast = Math.min(100, (eElast / maxEnergy) * 100);
+            const pKin = Math.min(100, (eKin / maxEnergy) * 100);
+            const pPot = Math.min(100, (ePot / maxEnergy) * 100);
+            const pTot = Math.min(100, (eTot / maxEnergy) * 100);
+
+            document.getElementById('bar-elastic').style.width = pElast + '%';
+            document.getElementById('bar-kinetic').style.width = pKin + '%';
+            document.getElementById('bar-potential').style.width = pPot + '%';
+            document.getElementById('bar-total').style.width = pTot + '%';
+
+            // Actualización de texto UI
+            document.getElementById('val-elastic').innerText = Math.round(eElast) + ' J';
+            document.getElementById('val-kinetic').innerText = Math.round(eKin) + ' J';
+            document.getElementById('val-potential').innerText = Math.round(ePot) + ' J';
+            document.getElementById('val-total').innerText = Math.round(eTot) + ' J';
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
